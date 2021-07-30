@@ -1,74 +1,71 @@
-import cv2 as cv
+import cv2
 import numpy as np
+import mediapipe as mp
+# Video Capture
+capture = cv2.VideoCapture(0)
 
-BODY_PARTS = {"Nose": 0, "Neck": 1, "RShoulder": 2, "RElbow": 3, "RWrist": 4,
-              "LShoulder": 5, "LElbow": 6, "LWrist": 7, "RHip": 8, "RKnee": 9,
-              "RAnkle": 10, "LHip": 11, "LKnee": 12, "LAnkle": 13, "REye": 14,
-              "LEye": 15, "REar": 16, "LEar": 17, "Background": 18}
+#Grayscale for haar cascade
+#gray = cv2.cvtColor(capture,cv2.COLOR_BGR2GRAY)
 
-POSE_PAIRS = [["Neck", "RShoulder"], ["Neck", "LShoulder"], ["RShoulder", "RElbow"],
-              ["RElbow", "RWrist"], ["LShoulder", "LElbow"], ["LElbow", "LWrist"],
-              ["Neck", "RHip"], ["RHip", "RKnee"], ["RKnee", "RAnkle"], ["Neck", "LHip"],
-              ["LHip", "LKnee"], ["LKnee", "LAnkle"], ["Neck", "Nose"], ["Nose", "REye"],
-              ["REye", "REar"], ["Nose", "LEye"], ["LEye", "LEar"]]
+fgbg = cv2.createBackgroundSubtractorMOG2(50, 200, True)
 
-width = 368
-height = 368
-inWidth = width
-inHeight = height
+# Keeps track of what frame we're on
+frameCount = 0
 
-net = cv.dnn.readNetFromTensorflow("graph_opt.pb")
-thr = 0.2
+#Create haar cascade
+haar_cascade = cv2.CascadeClassifier('haar_face.xml')
+
+#faces_rect = haar_cascade.detectMultiScale(gray,scaleFactor=1.1, minNeighbors=3)
+
+while(1):
+	# Return Value and the current frame
+	ret, frame = capture.read()
+
+	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+	faces_rect = haar_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3)
+
+	#Draw rectangle over face
+	for (x,y,w,h) in faces_rect:
+		cv2.rectangle(frame, (x,y), (x+w,y+h), (0,0,255), thickness=2 )
+
+	#  Check if a current frame actually exist
+	if not ret:
+		break
+
+	frameCount += 1
+	# Resize the frame
+	resizedFrame = cv2.resize(frame, (0, 0), fx=0.50, fy=0.50)
+
+	# Get the foreground mask
+	fgmask = fgbg.apply(resizedFrame)
+
+	# Count all the non zero pixels within the mask
+	count = np.count_nonzero(fgmask)
+
+	print('Frame: %d, Pixel Count: %d' % (frameCount, count))
+
+	# Determine how many pixels do you want to detect to be considered "movement"
+	if frameCount > 1 and count > 500:
+		movement = True
+		print("Movement Detected")
+		cv2.putText(resizedFrame, 'Movement Detected', (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2, cv2.LINE_AA)
 
 
-def poseDetector(frame):
-    frameWidth = frame.shape[1]
-    frameHeight = frame.shape[0]
+	gray = cv2.cvtColor(resizedFrame, cv2.COLOR_BGR2GRAY)
+	faces_rect = haar_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3)
 
-    net.setInput(cv.dnn.blobFromImage(frame, 1.0, (inWidth, inHeight), (127.5, 127.5, 127.5), swapRB=True, crop=False))
-    out = net.forward()
-    out = out[:, :19, :, :]  # MobileNet output [1, 57, -1, -1], we only need the first 19 elements
+	#Draw rectangle over face
+	for (x,y,w,h) in faces_rect:
+		cv2.rectangle(resizedFrame, (x,y), (x+w,y+h), (0,0,255), thickness=2 )
+		cv2.putText(resizedFrame, 'Face Detected', (30, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2,
+					cv2.LINE_AA)
 
-    assert (len(BODY_PARTS) == out.shape[1])
+	cv2.imshow("Camera", resizedFrame )
 
-    points = []
-    for i in range(len(BODY_PARTS)):
-        # Slice heatmap of corresponging body's part.
-        heatMap = out[0, i, :, :]
 
-        _, conf, _, point = cv.minMaxLoc(heatMap)
-        x = (frameWidth * point[0]) / out.shape[3]
-        y = (frameHeight * point[1]) / out.shape[2]
-        points.append((int(x), int(y)) if conf > thr else None)
+	k = cv2.waitKey(1) & 0xff
+	if k == 27:
+		break
 
-    for pair in POSE_PAIRS:
-        partFrom = pair[0]
-        partTo = pair[1]
-        assert(partFrom in BODY_PARTS)
-        assert(partTo in BODY_PARTS)
-
-        idFrom = BODY_PARTS[partFrom]
-        idTo = BODY_PARTS[partTo]
-
-        if points[idFrom] and points[idTo]:
-            cv.line(frame, points[idFrom], points[idTo], (0, 255, 0), 3)
-            cv.ellipse(frame, points[idFrom], (3, 3), 0, 0, 360, (0, 0, 255), cv.FILLED)
-            cv.ellipse(frame, points[idTo], (3, 3), 0, 0, 360, (0, 0, 255), cv.FILLED)
-
-    t, _ = net.getPerfProfile()
-
-    return frame
-cap = cv.VideoCapture('dance.mp4')
-ret, frame = cap.read()
-frame_height, frame_width, _ = frame.shape
-out = cv.VideoWriter('output.avi',cv.VideoWriter_fourcc('M','J','P','G'), 10, (frame_width,frame_height))
-print("Processing Video...")
-while cap.isOpened():
-  ret, frame = cap.read()
-  if not ret:
-    out.release()
-    break
-  output = poseDetector(frame)
-  out.write(output)
-out.release()
-print("Done processing video")
+capture.release()
+cv2.destroyAllWindows()
